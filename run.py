@@ -41,8 +41,11 @@ def config_parser():
     parser.add_argument("--render_test", action='store_true')
     parser.add_argument("--render_train", action='store_true')
     parser.add_argument("--render_video", action='store_true')
+    parser.add_argument("--render_video_flipy", action='store_true')
+    parser.add_argument("--render_video_rot90", default=0, type=int)
     parser.add_argument("--render_video_factor", type=float, default=0,
                         help='downsampling factor to speed up rendering, set 4 or 8 for fast preview')
+    parser.add_argument("--dump_images", action='store_true')
     parser.add_argument("--eval_ssim", action='store_true')
     parser.add_argument("--eval_lpips_alex", action='store_true')
     parser.add_argument("--eval_lpips_vgg", action='store_true')
@@ -57,7 +60,8 @@ def config_parser():
 
 @torch.no_grad()
 def render_viewpoints(model, render_poses, HW, Ks, ndc, render_kwargs,
-                      gt_imgs=None, savedir=None, render_factor=0,
+                      gt_imgs=None, savedir=None, dump_images=False,
+                      render_factor=0, render_video_flipy=False, render_video_rot90=0,
                       eval_ssim=False, eval_lpips_alex=False, eval_lpips_vgg=False):
     '''Render images for the given viewpoints; run evaluation if gt given.
     '''
@@ -123,8 +127,19 @@ def render_viewpoints(model, render_poses, HW, Ks, ndc, render_kwargs,
         if eval_lpips_vgg: print('Testing lpips (vgg)', np.mean(lpips_vgg), '(avg)')
         if eval_lpips_alex: print('Testing lpips (alex)', np.mean(lpips_alex), '(avg)')
 
-    if savedir is not None:
-        print(f'Writing images to {savedir}')
+    if render_video_flipy:
+        for i in range(len(rgbs)):
+            rgbs[i] = np.flip(rgbs[i], axis=0)
+            depths[i] = np.flip(depths[i], axis=0)
+            bgmaps[i] = np.flip(bgmaps[i], axis=0)
+
+    if render_video_rot90 != 0:
+        for i in range(len(rgbs)):
+            rgbs[i] = np.rot90(rgbs[i], k=render_video_rot90, axes=(0,1))
+            depths[i] = np.rot90(depths[i], k=render_video_rot90, axes=(0,1))
+            bgmaps[i] = np.rot90(bgmaps[i], k=render_video_rot90, axes=(0,1))
+
+    if savedir is not None and dump_images:
         for i in trange(len(rgbs)):
             rgb8 = utils.to8b(rgbs[i])
             filename = os.path.join(savedir, '{:03d}.png'.format(i))
@@ -648,12 +663,13 @@ if __name__=='__main__':
     if args.render_train:
         testsavedir = os.path.join(cfg.basedir, cfg.expname, f'render_train_{ckpt_name}')
         os.makedirs(testsavedir, exist_ok=True)
+        print('All results are dumped into', testsavedir)
         rgbs, depths, bgmaps = render_viewpoints(
                 render_poses=data_dict['poses'][data_dict['i_train']],
                 HW=data_dict['HW'][data_dict['i_train']],
                 Ks=data_dict['Ks'][data_dict['i_train']],
                 gt_imgs=[data_dict['images'][i].cpu().numpy() for i in data_dict['i_train']],
-                savedir=testsavedir,
+                savedir=testsavedir, dump_images=args.dump_images,
                 eval_ssim=args.eval_ssim, eval_lpips_alex=args.eval_lpips_alex, eval_lpips_vgg=args.eval_lpips_vgg,
                 **render_viewpoints_kwargs)
         imageio.mimwrite(os.path.join(testsavedir, 'video.rgb.mp4'), utils.to8b(rgbs), fps=30, quality=8)
@@ -663,12 +679,13 @@ if __name__=='__main__':
     if args.render_test:
         testsavedir = os.path.join(cfg.basedir, cfg.expname, f'render_test_{ckpt_name}')
         os.makedirs(testsavedir, exist_ok=True)
+        print('All results are dumped into', testsavedir)
         rgbs, depths, bgmaps = render_viewpoints(
                 render_poses=data_dict['poses'][data_dict['i_test']],
                 HW=data_dict['HW'][data_dict['i_test']],
                 Ks=data_dict['Ks'][data_dict['i_test']],
                 gt_imgs=[data_dict['images'][i].cpu().numpy() for i in data_dict['i_test']],
-                savedir=testsavedir,
+                savedir=testsavedir, dump_images=args.dump_images,
                 eval_ssim=args.eval_ssim, eval_lpips_alex=args.eval_lpips_alex, eval_lpips_vgg=args.eval_lpips_vgg,
                 **render_viewpoints_kwargs)
         imageio.mimwrite(os.path.join(testsavedir, 'video.rgb.mp4'), utils.to8b(rgbs), fps=30, quality=8)
@@ -678,16 +695,22 @@ if __name__=='__main__':
     if args.render_video:
         testsavedir = os.path.join(cfg.basedir, cfg.expname, f'render_video_{ckpt_name}')
         os.makedirs(testsavedir, exist_ok=True)
+        print('All results are dumped into', testsavedir)
         rgbs, depths, bgmaps = render_viewpoints(
                 render_poses=data_dict['render_poses'],
                 HW=data_dict['HW'][data_dict['i_test']][[0]].repeat(len(data_dict['render_poses']), 0),
                 Ks=data_dict['Ks'][data_dict['i_test']][[0]].repeat(len(data_dict['render_poses']), 0),
                 render_factor=args.render_video_factor,
-                savedir=testsavedir,
+                render_video_flipy=args.render_video_flipy,
+                render_video_rot90=args.render_video_rot90,
+                savedir=testsavedir, dump_images=args.dump_images,
                 **render_viewpoints_kwargs)
         imageio.mimwrite(os.path.join(testsavedir, 'video.rgb.mp4'), utils.to8b(rgbs), fps=30, quality=8)
-        imageio.mimwrite(os.path.join(testsavedir, 'video.bgmap.mp4'), utils.to8b(bgmaps), fps=30, quality=8)
-        imageio.mimwrite(os.path.join(testsavedir, 'video.depth.mp4'), utils.to8b(1 - depths / np.max(depths)), fps=30, quality=8)
+        import matplotlib.pyplot as plt
+        depths_vis = depths * (1-bgmaps) + bgmaps
+        dmin, dmax = np.percentile(depths_vis[bgmaps < 0.1], q=[5, 95])
+        depth_vis = plt.get_cmap('rainbow')(1 - np.clip((depths_vis - dmin) / (dmax - dmin), 0, 1)).squeeze()[..., :3]
+        imageio.mimwrite(os.path.join(testsavedir, 'video.depth.mp4'), utils.to8b(depth_vis), fps=30, quality=8)
 
     print('Done')
 
