@@ -1,12 +1,12 @@
 _base_ = '../default.py'
 
-basedir = './logs/nerf_unbounded'
+basedir = './logs/custom'
 
 data = dict(
     dataset_type='llff',
     spherify=True,
-    factor=4,
-    llffhold=8,
+    llffhold=0,
+    bd_factor=None,
     white_bkgd=True,
     rand_bkgd=True,
     unbounded_inward=True,
@@ -20,7 +20,7 @@ fine_train = dict(
     N_rand=4096,
     lrate_decay=80,
     ray_sampler='flatten',
-    weight_nearclip=1.0,
+    weight_nearclip=0.0,
     weight_distortion=0.01,
     pg_scale=[2000,4000,6000,8000,10000,12000,14000,16000],
     tv_before=20000,
